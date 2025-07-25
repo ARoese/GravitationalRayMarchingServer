@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package grm.protobuf;
+
+message UInt3 {
+  uint32 x = 1;
+  uint32 y = 2;
+  uint32 z = 3;
+}
+
+message UInt2 {
+  uint32 x = 1;
+  uint32 y = 2;
+}
+
+message Float2 {
+  float x = 1;
+  float y = 2;
+}
+
+message Float3 {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}

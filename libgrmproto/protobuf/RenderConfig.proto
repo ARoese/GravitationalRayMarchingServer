@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package grm.protobuf;
+
+import "Primitives.proto";
+
+message MarchConfig {
+  // how many steps should the raymarch take from the camera?
+  uint32 marchSteps = 1;
+  // how much time should pass in each step?
+  // (lower means higher step resolution, but needs more steps to cover the same distance)
+  float marchStepDeltaTime = 2;
+}
+
+message RenderConfig {
+  UInt2 resolution = 1;
+  optional MarchConfig marchConfig = 2;
+}

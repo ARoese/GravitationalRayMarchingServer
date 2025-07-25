@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package grm.protobuf;
+
+import "Primitives.proto";
+import "Texture.proto";
+
+message Material {
+  oneof shader {
+    UInt3 color = 1;
+    Texture texture = 2;
+  }
+}

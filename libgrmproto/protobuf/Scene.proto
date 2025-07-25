@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package grm.protobuf;
+
+import "Camera.proto";
+import "Body.proto";
+import "Material.proto";
+
+message UniversalConstants {
+  float G = 2;
+  float C = 1;
+}
+
+message Scene {
+  Camera cam = 1;
+  repeated Body bodies = 2;
+  optional UniversalConstants constants = 3;
+  Material nohit = 4;
+}

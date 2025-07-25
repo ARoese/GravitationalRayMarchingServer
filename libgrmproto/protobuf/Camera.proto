@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package grm.protobuf;
+
+import "Primitives.proto";
+
+message Camera {
+  Float2 fov = 1;
+  Float3 camPos = 2;
+  Float3 camRot = 3;
+}

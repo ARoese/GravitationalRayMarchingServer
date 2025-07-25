@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package grm.protobuf;
+
+import "Primitives.proto";
+import "Material.proto";
+
+message Body {
+  float radius = 1;
+  float mass = 2;
+  Float3 position = 3;
+  Float3 rotation = 4;
+  Material material = 5;
+}
