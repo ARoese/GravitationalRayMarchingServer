@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package grm.protobuf;
 
+message BlobIdentifier {
+  uint32 id = 1;
+}
+
 message UInt3 {
   uint32 x = 1;
   uint32 y = 2;

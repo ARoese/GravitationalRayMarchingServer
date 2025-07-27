@@ -5,28 +5,28 @@ package grm.protobuf;
 import "RenderConfig.proto";
 import "Scene.proto";
 import "Texture.proto";
+import "Primitives.proto";
 
 enum RenderDevice {
   CPU = 0;
   GPU = 1;
 }
 
+message BlobsHeader {
+  message BlobLengthId {
+    BlobIdentifier identifier = 1;
+    uint64 blobLength = 2;
+  }
+  repeated BlobLengthId blobs = 1;
+}
+
 message RenderRequest {
   RenderDevice device = 1;
   Scene scene = 2;
   RenderConfig config = 3;
+  BlobsHeader blobsInfo = 4;
 }
 
-message RenderCancellationRequest{}
-
-message Request {
-  oneof Content {
-    RenderRequest renderRequest = 1;
-    RenderCancellationRequest renderCancellationRequest = 2;
-  }
-}
-
-message RenderCanceled {}
 message RenderError {
   string reason = 1;
 }
@@ -38,14 +38,14 @@ message RequestFailure {
 message RenderResult {
   oneof Result {
     Texture success = 1;
-    RenderCanceled canceled = 2;
-    RenderError error = 3;
+    RenderError error = 2;
   }
 }
 
-message Response {
+message RenderResponse {
     oneof Union {
       RequestFailure invalidRequest = 1;
       RenderResult result = 2;
     }
+    BlobsHeader blobsInfo = 3;
 }

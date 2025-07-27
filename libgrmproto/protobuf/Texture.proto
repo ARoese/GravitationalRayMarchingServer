@@ -2,8 +2,14 @@ syntax = "proto3";
 
 package grm.protobuf;
 
+import "Primitives.proto";
+
 message Texture {
   uint32 width = 1;
   uint32 height = 2;
-  bytes data = 3;
+  BlobIdentifier blobIdent = 3;
+  enum ImageEncodingType {
+    RAW_RGB = 0;
+  }
+  ImageEncodingType encoding = 4;
 }
