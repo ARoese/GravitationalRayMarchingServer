@@ -71,11 +71,15 @@ void cancel_on_close(tcp::iostream &sockStream, const CancellationToken& ct, Can
             return;
         }
         // consume the rest of the input stream until eof
+        // TODO: the sockstream is sometimes being cleaned up by the other thread and thus becoming invalidated
+        // It should be accessed through a shared_ptr on both sides to prevent this
         sockStream.read(&buffer[0], BUFFER_SIZE);
     }
 
     ct_to_cancel.cancel();
 }
+
+constexpr int MAX_RENDER_DIMENSION = 8192;
 
 void do_render_conversation(tcp::iostream& sockStream) {
     auto request = read_request_from_stream(sockStream);
@@ -86,6 +90,12 @@ void do_render_conversation(tcp::iostream& sockStream) {
 
     if (request.device() != grm::protobuf::CPU && request.device() != grm::protobuf::GPU) {
         throw RequestException(std::format("Unknown render device"));
+    }
+    if (renderConfig.resolution.x * renderConfig.resolution.y == 0) {
+        throw RenderException("One of the render resolution dimensions is 0");
+    }
+    if (renderConfig.resolution.x > MAX_RENDER_DIMENSION || renderConfig.resolution.y > MAX_RENDER_DIMENSION) {
+        throw RequestException(std::format("Max render dimension of {} was exceeded", MAX_RENDER_DIMENSION));
     }
 
     auto renderer = Renderer();
@@ -149,6 +159,7 @@ void handle_request(tcp::iostream sockStream) {
             << std::endl;
     }catch (RequestException& e) {
         grm::protobuf::RenderResponse response;
+        response.mutable_blobsinfo();
         response.mutable_invalidrequest()->set_reason(std::string(e.what()));
 
         sockStream.clear(); // clear any iostate errors so we can try to send a response
@@ -159,9 +170,13 @@ void handle_request(tcp::iostream sockStream) {
 
         std::string out;
         response.SerializeToString(&out);
+        boost::endian::big_uint32_buf_t len;
+        len = out.size();
+        sockStream.write(reinterpret_cast<char*>(len.data()), 4);
         sockStream << out;
     }catch (RenderException& e) {
         grm::protobuf::RenderResponse response;
+        response.mutable_blobsinfo();
         response.mutable_result()->mutable_error()->set_reason(std::string(e.what()));
 
         sockStream.clear(); // clear any iostate errors so we can try to send a response
@@ -171,6 +186,9 @@ void handle_request(tcp::iostream sockStream) {
             << std::endl;
         std::string out;
         response.SerializeToString(&out);
+        boost::endian::big_uint32_buf_t len;
+        len = out.size();
+        sockStream.write(reinterpret_cast<char*>(len.data()), 4);
         sockStream << out;
     }
     sockStream.flush();
