@@ -3,6 +3,7 @@
 //
 
 #include <vector>
+#include <boost/asio/read.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/endian/buffers.hpp>
 
@@ -61,19 +62,29 @@ BlobMap read_blobs_from_stream(tcp::iostream& sockStream, const grm::protobuf::B
     return map;
 }
 
-void cancel_on_close(tcp::iostream &sockStream, const CancellationToken& ct, CancellationToken& ct_to_cancel) {
+bool is_good(const std::weak_ptr<tcp::iostream> &sockStream) {
+    const auto shared = sockStream.lock();
+    if (shared == nullptr) {
+        return false;
+    }
+    return shared->good();
+}
+
+void cancel_on_close(const std::weak_ptr<tcp::iostream> &sockStream, const CancellationToken& ct, CancellationToken& ct_to_cancel) {
     constexpr auto BUFFER_SIZE = 1024;
     // Buffer to store throwaway data
-    auto buffer = std::make_unique<char[]>(BUFFER_SIZE);
+    char buffer[BUFFER_SIZE];
 
-    while (sockStream.good()) {
+    // we do not want to create and hold a shared_ptr while blocking on a read here
+    while (is_good(sockStream)) {
         if (ct.cancelled) {
             return;
         }
-        // consume the rest of the input stream until eof
-        // TODO: the sockstream is sometimes being cleaned up by the other thread and thus becoming invalidated
-        // It should be accessed through a shared_ptr on both sides to prevent this
-        sockStream.read(&buffer[0], BUFFER_SIZE);
+        auto shared = sockStream.lock();
+        if (shared == nullptr) {
+            ct_to_cancel.cancel();
+        }
+        shared->read(&buffer[0], BUFFER_SIZE);
     }
 
     ct_to_cancel.cancel();
@@ -81,9 +92,9 @@ void cancel_on_close(tcp::iostream &sockStream, const CancellationToken& ct, Can
 
 constexpr int MAX_RENDER_DIMENSION = 8192;
 
-void do_render_conversation(tcp::iostream& sockStream) {
-    auto request = read_request_from_stream(sockStream);
-    auto blobs = read_blobs_from_stream(sockStream, request.blobsinfo());
+void do_render_conversation(std::shared_ptr<tcp::iostream> sockStream) {
+    auto request = read_request_from_stream(*sockStream);
+    auto blobs = read_blobs_from_stream(*sockStream, request.blobsinfo());
 
     auto scene = from_protobuf(request.scene(), blobs);
     auto renderConfig = from_protobuf(request.config());
@@ -106,9 +117,12 @@ void do_render_conversation(tcp::iostream& sockStream) {
     auto socket_watch_ct = std::make_shared<CancellationToken>();
     auto cudaContext = CudaContext();
 
-    auto cancellationThread = std::thread([&sockStream, socket_watch_ct, render_ct] {
-        // TODO: ensure this thread actually terminates as expected
-        cancel_on_close(sockStream, *socket_watch_ct, *render_ct);
+    // make weak ptr here and capture it by copy so that this lambda doesn't capture
+    // the shared_ptr and thus prevent the socket from being closed by RAII.
+    // This thread will be detached, so it also can't capture by reference.
+    std::weak_ptr<tcp::iostream> weak_sockStream = sockStream;
+    auto cancellationThread = std::thread([weak_sockStream, socket_watch_ct, render_ct] {
+        cancel_on_close(weak_sockStream, *socket_watch_ct, *render_ct);
     });
 
     auto result = request.device() == grm::protobuf::GPU
@@ -134,63 +148,54 @@ void do_render_conversation(tcp::iostream& sockStream) {
         render_response.SerializeToString(&out);
         boost::endian::big_uint32_buf_t len;
         len = out.size();
-        sockStream.write(reinterpret_cast<char*>(&len), 4);
-        sockStream << out;
-        sockStream.write(blob.data(), blob.size());
+        sockStream->write(reinterpret_cast<char*>(&len), 4);
+        *sockStream << out;
+        sockStream->write(blob.data(), blob.size());
     }else {
-        render_result.mutable_error()->set_reason(std::string("Rendering failed. Unknown reason. Potentially canceled"));
-        *render_response.mutable_result() = render_result;
-
-        std::string out;
-        render_result.SerializeToString(&out);
-        boost::endian::big_uint32_buf_t len;
-        len = out.size();
-        sockStream.write(reinterpret_cast<char*>(&len), 4);
-        sockStream << out;
+        if (!render_ct->cancelled) {
+            throw RenderException("unknown rendering error");
+        }
     }
 }
 
-void handle_request(tcp::iostream sockStream) {
+void send_response(const grm::protobuf::RenderResponse &response, tcp::iostream &sockStream) {
+    sockStream.clear();
+    std::string out;
+    response.SerializeToString(&out);
+    boost::endian::big_uint32_buf_t len;
+    len = out.size();
+    sockStream.write(reinterpret_cast<char*>(len.data()), 4);
+    sockStream << out;
+}
+
+void handle_request(tcp::iostream __sockStream) {
+    const auto shared_sockStream = std::make_shared<tcp::iostream>(std::move(__sockStream));
     try {
         //sockStream.exceptions(std::ios::failbit);
-        do_render_conversation(sockStream);
+        do_render_conversation(shared_sockStream);
         std::cout
-            << std::format("{}: Request handled successfully", toString(sockStream.socket().remote_endpoint()))
+            << std::format("{}: Request handled successfully", toString(shared_sockStream->socket().remote_endpoint()))
             << std::endl;
     }catch (RequestException& e) {
         grm::protobuf::RenderResponse response;
         response.mutable_blobsinfo();
         response.mutable_invalidrequest()->set_reason(std::string(e.what()));
 
-        sockStream.clear(); // clear any iostate errors so we can try to send a response
-
         std::cout
-            << std::format("{}: RequestException: {}", toString(sockStream.socket().remote_endpoint()), e.what())
+            << std::format("{}: RequestException: {}", toString(shared_sockStream->socket().remote_endpoint()), e.what())
             << std::endl;
 
-        std::string out;
-        response.SerializeToString(&out);
-        boost::endian::big_uint32_buf_t len;
-        len = out.size();
-        sockStream.write(reinterpret_cast<char*>(len.data()), 4);
-        sockStream << out;
+        send_response(response, *shared_sockStream);
     }catch (RenderException& e) {
         grm::protobuf::RenderResponse response;
         response.mutable_blobsinfo();
         response.mutable_result()->mutable_error()->set_reason(std::string(e.what()));
 
-        sockStream.clear(); // clear any iostate errors so we can try to send a response
-
         std::cout
-            << std::format("{}: RenderException: {}", toString(sockStream.socket().remote_endpoint()), e.what())
+            << std::format("{}: RenderException: {}", toString(shared_sockStream->socket().remote_endpoint()), e.what())
             << std::endl;
-        std::string out;
-        response.SerializeToString(&out);
-        boost::endian::big_uint32_buf_t len;
-        len = out.size();
-        sockStream.write(reinterpret_cast<char*>(len.data()), 4);
-        sockStream << out;
+        send_response(response, *shared_sockStream);
     }
-    sockStream.flush();
-    sockStream.close();
+    shared_sockStream->flush();
+    shared_sockStream->close();
 }
