@@ -1,11 +1,7 @@
 cmake_minimum_required(VERSION 3.31)
 project(GravitationalRayMarchingProtobuf CXX)
 
-set(absl_DIR "C:/Program Files/Protobuf/lib/cmake/absl")
-set(utf8_range_DIR "C:/Program Files/Protobuf/lib/cmake/utf8_range")
-set(GTest_DIR "C:/Program Files/Protobuf/lib/cmake/GTest")
-find_package(GTest CONFIG REQUIRED)
-find_package(Protobuf CONFIG REQUIRED)
+find_package(protobuf CONFIG REQUIRED)
 
 file(GLOB PROTO_FILES CONFIGURE_DEPENDS
         "protobuf/*.proto"

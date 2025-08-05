@@ -1,0 +1,9 @@
+{
+  "version" : "1.0.0",
+  "name" : "gravitational-ray-marching-server",
+  "dependencies" : [ "boost-asio", "boost-program-options", "boost-endian", {
+    "name" : "protobuf",
+    "version>=" : "5.29.3#1"
+  }],
+  "builtin-baseline" : "8cce1e1118ea2569d5117f096035671a8490b8f4"
+}
